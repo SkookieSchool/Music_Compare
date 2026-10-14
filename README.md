@@ -4,6 +4,7 @@ Music Compare is a desktop application made for WQRI that compares two music
 spreadsheets and creates a list of songs that are not shared between them.
 
 Original programming by Eliza Boulay.
+
 Dark mode & modifying the program to be easier to expand and maintain by Nikki Gardiner.
 
 ## Features
