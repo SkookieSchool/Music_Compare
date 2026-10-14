@@ -1,0 +1,5 @@
+pandas
+rapidfuzz
+playsound3==3.3.2
+openpyxl
+xlrd

@@ -1,0 +1,3 @@
+# Similarity thresholds
+TITLE_THRESHOLD = 90
+ARTIST_THRESHOLD = 90
