@@ -64,8 +64,25 @@ jobs:
         if: matrix.platform == 'macos'
         shell: bash
         run: |
-          mkdir release
-          zip -r "release/Music_Compare-macos.zip" "dist/Music_Compare.app"
+          set -euo pipefail
+
+          echo "Checking PyInstaller output..."
+          ls -la dist/
+
+          test -d "dist/Music_Compare.app" || {
+            echo "ERROR: dist/Music_Compare.app was not created"
+            exit 1
+          }
+
+          mkdir -p release
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/Music_Compare.app" \
+            "release/Music_Compare-macos.zip"
+
+          echo "Checking packaged application..."
+          test -s "release/Music_Compare-macos.zip"
+          ls -lh release/
 
       - name: Package Linux application
         if: matrix.platform == 'linux'
