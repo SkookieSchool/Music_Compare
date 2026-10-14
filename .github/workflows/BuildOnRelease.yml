@@ -1,0 +1,182 @@
+name: Build release applications
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x64
+          - os: windows-2022
+            platform: windows
+            architecture: x64
+            data_separator: ";"
+
+          # macOS Intel x64
+          - os: macos-15-intel
+            platform: macos
+            architecture: x64
+            data_separator: ":"
+
+          # macOS Apple Silicon ARM64
+          - os: macos-15
+            platform: macos
+            architecture: arm64
+            data_separator: ":"
+
+          # Linux x64
+          - os: ubuntu-24.04
+            platform: linux
+            architecture: x64
+            data_separator: ":"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils \
+            build-essential
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        shell: bash
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onefile \
+            --windowed \
+            --name Music_Compare \
+            --add-data "UI/sealquestionmark.png${{ matrix.data_separator }}." \
+            --add-data "UI/Seal_noises_fixed.wav${{ matrix.data_separator }}." \
+            Music_Compare_GUI_V2.py
+
+      # Package Windows application
+      - name: Package Windows application
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+
+          if (!(Test-Path "dist/Music_Compare.exe")) {
+            throw "Windows executable was not created."
+          }
+
+          Compress-Archive `
+            -Path "dist/Music_Compare.exe" `
+            -DestinationPath "release/Music_Compare-windows-x64.zip" `
+            -Force
+
+      # Package macOS Intel and Apple Silicon applications
+      - name: Package macOS application
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Runner architecture: $(uname -m)"
+          ls -la dist/
+
+          test -d "dist/Music_Compare.app" || {
+            echo "ERROR: dist/Music_Compare.app was not created."
+            exit 1
+          }
+
+          mkdir -p release
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/Music_Compare.app" \
+            "release/Music_Compare-macos-${{ matrix.architecture }}.zip"
+
+          ls -lh release/
+
+      # Package Linux application and launcher
+      - name: Package Linux application
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "dist/Music_Compare"
+
+          mkdir -p release/Music_Compare-linux
+
+          cp dist/Music_Compare \
+            release/Music_Compare-linux/
+
+          cat > release/Music_Compare-linux/Music_Compare.sh <<'EOF'
+          #!/usr/bin/env sh
+          set -eu
+          SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          exec "$SCRIPT_DIR/Music_Compare" "$@"
+          EOF
+
+          chmod +x release/Music_Compare-linux/Music_Compare.sh
+
+          tar -czf release/Music_Compare-linux-x64.tar.gz \
+            -C release Music_Compare-linux
+
+          cp release/Music_Compare-linux/Music_Compare.sh \
+            release/Music_Compare-linux-x64.sh
+
+      # Upload build outputs for the publish job
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.architecture }}-release
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attach applications to release
+    needs: build
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'release'
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-release"
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: |
+          find release-assets -maxdepth 2 -type f -print
+
+      - name: Upload assets to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
